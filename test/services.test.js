@@ -50,9 +50,9 @@ describe('createAirQualityService', () => {
   });
 
   it('wraps network and HTTP failures as upstream errors', async () => {
-    const failing = createAirQualityService({ fetchImpl: async () => { throw new Error('ECONNRESET'); } });
+    const failing = createAirQualityService({ logger: silentLogger, fetchImpl: async () => { throw new Error('ECONNRESET'); } });
     await assert.rejects(failing.geocode('Delhi'), UpstreamError);
-    const httpError = createAirQualityService({ fetchImpl: async () => jsonResponse({}, 500) });
+    const httpError = createAirQualityService({ logger: silentLogger, fetchImpl: async () => jsonResponse({}, 500) });
     await assert.rejects(httpError.getAirQuality(DELHI), UpstreamError);
   });
 

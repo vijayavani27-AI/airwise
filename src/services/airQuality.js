@@ -62,6 +62,7 @@ export function normalizeAirQuality(data) {
 export function createAirQualityService({
   fetchImpl = globalThis.fetch,
   timeoutMs = 15000,
+  logger = console,
   geoCache = new TtlCache({ ttlMs: 24 * 60 * 60 * 1000, maxEntries: 1000 }),
   airCache = new TtlCache({ ttlMs: 15 * 60 * 1000, maxEntries: 1000 }),
 } = {}) {
@@ -72,10 +73,14 @@ export function createAirQualityService({
         headers: { accept: 'application/json' },
         signal: AbortSignal.timeout(timeoutMs),
       });
-    } catch {
+    } catch (error) {
+      logger.warn?.(`Upstream request to ${url.hostname} failed: ${error.cause?.code ?? error.name}: ${error.message}`);
       throw new UpstreamError();
     }
-    if (!response.ok) throw new UpstreamError();
+    if (!response.ok) {
+      logger.warn?.(`Upstream ${url.hostname} responded with HTTP ${response.status}`);
+      throw new UpstreamError();
+    }
     return response.json();
   }
 
