@@ -22,6 +22,48 @@ function pickEnum(value, allowed, field, errors, fallback) {
 
 const isTrue = (value) => value === true;
 
+const LOCAL_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+const TIMEZONE = /^[A-Za-z0-9_/+-]{1,64}$/;
+const MAX_FORECAST_HOURS = 72;
+const MAX_AQI = 1000;
+const MAX_CONCENTRATION = 50000;
+const POLLUTANT_FIELDS = ['pm2_5', 'pm10', 'nitrogen_dioxide', 'ozone', 'carbon_monoxide', 'sulphur_dioxide'];
+const inRange = (value, max) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= max;
+
+/**
+ * Validate an Open-Meteo payload fetched by the browser (fallback when the server
+ * is rate-limited). Only known fields with plausible ranges survive.
+ */
+export function validateAirData(raw, errors) {
+  const current = raw?.current;
+  const hourly = raw?.hourly;
+  if (!current || typeof current.time !== 'string' || !LOCAL_TIME.test(current.time) || !inRange(current.us_aqi, MAX_AQI)) {
+    errors.push('airData.current must include a local time and a us_aqi between 0 and 1000');
+    return undefined;
+  }
+  const times = Array.isArray(hourly?.time) ? hourly.time : [];
+  const values = Array.isArray(hourly?.us_aqi) ? hourly.us_aqi : [];
+  if (
+    times.length > MAX_FORECAST_HOURS ||
+    times.length !== values.length ||
+    !times.every((t) => typeof t === 'string' && LOCAL_TIME.test(t)) ||
+    !values.every((v) => v === null || inRange(v, MAX_AQI))
+  ) {
+    errors.push(`airData.hourly must hold up to ${MAX_FORECAST_HOURS} matching time/us_aqi entries`);
+    return undefined;
+  }
+
+  const cleanCurrent = { time: current.time, us_aqi: current.us_aqi };
+  for (const field of POLLUTANT_FIELDS) {
+    cleanCurrent[field] = inRange(current[field], MAX_CONCENTRATION) ? current[field] : null;
+  }
+  return {
+    timezone: typeof raw.timezone === 'string' && TIMEZONE.test(raw.timezone) ? raw.timezone : 'UTC',
+    current: cleanCurrent,
+    hourly: { time: times, us_aqi: values },
+  };
+}
+
 /**
  * Validate and normalise an assistant request. Only whitelisted, typed values
  * survive - this also keeps free text out of the LLM prompt (prompt-injection defence).
@@ -75,6 +117,11 @@ export function validateAdviceRequest(body) {
     pregnant: isTrue(household.pregnant),
   };
   input.hasPurifier = isTrue(body.hasPurifier);
+
+  if (body.airData !== undefined) {
+    const airData = validateAirData(body.airData, errors);
+    if (airData) input.airData = airData;
+  }
 
   if (errors.length > 0) throw new ValidationError(errors);
   return input;

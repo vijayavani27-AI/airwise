@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { validateAdviceRequest } from '../src/lib/validation.js';
 import { ValidationError } from '../src/lib/errors.js';
+import { openMeteoAirPayload } from './fixtures.js';
 
 describe('validateAdviceRequest', () => {
   it('accepts a complete city request and normalises it', () => {
@@ -43,7 +44,31 @@ describe('validateAdviceRequest', () => {
     assert.equal(validateAdviceRequest({ city: 'Pune', commuteMode: 'wfh', commuteKm: 30 }).commuteKm, 0);
   });
 
+  it('accepts browser-fetched air data and strips unknown fields', () => {
+    const raw = openMeteoAirPayload();
+    raw.current.interval = 900;
+    raw.current.pm10 = -4;
+    const input = validateAdviceRequest({ city: 'Delhi', airData: raw });
+    assert.equal(input.airData.current.us_aqi, 180);
+    assert.equal(input.airData.current.interval, undefined);
+    assert.equal(input.airData.current.pm10, null);
+    assert.equal(input.airData.hourly.time.length, 48);
+    assert.equal(input.airData.timezone, 'Asia/Kolkata');
+  });
+
+  const badAirData = () => openMeteoAirPayload();
+  const tamper = (fn) => {
+    const raw = badAirData();
+    fn(raw);
+    return { city: 'Delhi', airData: raw };
+  };
+
   const invalidCases = [
+    ['air data with an impossible AQI', tamper((r) => { r.current.us_aqi = 99999; })],
+    ['air data with a malformed time', tamper((r) => { r.current.time = 'yesterday'; })],
+    ['air data with mismatched hourly arrays', tamper((r) => { r.hourly.us_aqi.pop(); })],
+    ['air data with too many hours', tamper((r) => { r.hourly.time = Array(100).fill('2026-11-22T10:00'); r.hourly.us_aqi = Array(100).fill(1); })],
+    ['air data that is not an object', { city: 'Delhi', airData: 'lots of smog' }],
     ['a non-object body', null],
     ['an array body', []],
     ['a missing location', {}],

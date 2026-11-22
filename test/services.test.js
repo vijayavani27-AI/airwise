@@ -6,7 +6,7 @@ import { computeImpact, suggestCommuteSwitch, weeklyCommuteKg } from '../src/ser
 import { buildRulePlan } from '../src/services/rules.js';
 import { createAssistant } from '../src/services/assistant.js';
 import { sanitizePlan } from '../src/lib/plan.js';
-import { NotFoundError, UpstreamError } from '../src/lib/errors.js';
+import { AirDataUnavailableError, NotFoundError, UpstreamError } from '../src/lib/errors.js';
 import { baseInput, jsonResponse, openMeteoAirPayload, silentLogger } from './fixtures.js';
 
 const DELHI = { name: 'Delhi', region: 'Delhi', country: 'India', latitude: 28.65, longitude: 77.23 };
@@ -209,6 +209,21 @@ describe('createAssistant', () => {
     const result = await createAssistant({ airQuality, gemini, logger: silentLogger }).advise(baseInput());
     assert.equal(result.source, 'rules');
     assert.ok(result.plan.routine.length > 0);
+  });
+
+  it('signals the browser fallback when the server cannot fetch air data', async () => {
+    const blocked = { geocode: async () => DELHI, getAirQuality: async () => { throw new UpstreamError(); } };
+    await assert.rejects(
+      createAssistant({ airQuality: blocked, gemini: { enabled: false } }).advise(baseInput()),
+      (err) => err instanceof AirDataUnavailableError && err.status === 503 && err.location.latitude === DELHI.latitude,
+    );
+  });
+
+  it('uses browser-supplied air data without calling the air API', async () => {
+    const airQualityNoFetch = { geocode: async () => DELHI, getAirQuality: async () => assert.fail('should not fetch') };
+    const result = await createAssistant({ airQuality: airQualityNoFetch, gemini: { enabled: false } })
+      .advise(baseInput({ airData: openMeteoAirPayload({ aqi: 77 }) }));
+    assert.equal(result.air.aqi, 77);
   });
 
   it('supports coordinates without geocoding', async () => {

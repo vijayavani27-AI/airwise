@@ -1,7 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/app.js';
-import { NotFoundError, UpstreamError } from '../src/lib/errors.js';
+import { AirDataUnavailableError, NotFoundError, UpstreamError } from '../src/lib/errors.js';
 import { silentLogger } from './fixtures.js';
 
 /** Start the app on an ephemeral port and return its base URL. */
@@ -28,6 +28,7 @@ describe('HTTP API', () => {
       lastInput = input;
       if (input.city === 'Atlantis') throw new NotFoundError('No such place');
       if (input.city === 'Outage') throw new UpstreamError();
+      if (input.city === 'Blocked') throw new AirDataUnavailableError({ latitude: 1.5, longitude: 2.5 });
       if (input.city === 'Crash') throw new Error('secret internal detail');
       return { source: 'gemini', plan: { summary: 'ok' } };
     },
@@ -86,6 +87,13 @@ describe('HTTP API', () => {
   it('maps domain errors to safe status codes', async () => {
     assert.equal((await post(ctx.base, { city: 'Atlantis' })).status, 404);
     assert.equal((await post(ctx.base, { city: 'Outage' })).status, 502);
+    const blocked = await post(ctx.base, { city: 'Blocked' });
+    assert.equal(blocked.status, 503);
+    assert.deepEqual(await blocked.json(), {
+      error: 'The server could not fetch live air-quality data.',
+      code: 'AIR_DATA_UNAVAILABLE',
+      location: { latitude: 1.5, longitude: 2.5 },
+    });
     const crash = await post(ctx.base, { city: 'Crash' });
     assert.equal(crash.status, 500);
     assert.doesNotMatch(await crash.text(), /secret internal detail/);

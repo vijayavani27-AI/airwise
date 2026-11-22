@@ -159,6 +159,34 @@ function renderResults(data) {
   heading?.focus();
 }
 
+const AIR_QUALITY_URL = 'https://air-quality-api.open-meteo.com/v1/air-quality';
+
+/** Fallback: fetch live air quality from the user's own browser (own IP, own rate limit). */
+async function fetchAirDataInBrowser({ latitude, longitude }) {
+  const params = new URLSearchParams({
+    latitude: String(latitude),
+    longitude: String(longitude),
+    current: 'us_aqi,pm2_5,pm10,nitrogen_dioxide,ozone,carbon_monoxide,sulphur_dioxide',
+    hourly: 'us_aqi',
+    forecast_days: '2',
+    timezone: 'auto',
+  });
+  const response = await fetch(`${AIR_QUALITY_URL}?${params}`);
+  if (!response.ok) throw new Error('Live air-quality data is unavailable right now. Please try again in a minute.');
+  const raw = await response.json();
+  return { timezone: raw.timezone, current: raw.current, hourly: { time: raw.hourly?.time, us_aqi: raw.hourly?.us_aqi } };
+}
+
+async function requestAdvice(payload) {
+  const response = await fetch('/api/advice', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => ({}));
+  return { response, data };
+}
+
 async function submit(event) {
   event.preventDefault();
   clearError();
@@ -171,12 +199,11 @@ async function submit(event) {
 
   setLoading(true);
   try {
-    const response = await fetch('/api/advice', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const data = await response.json().catch(() => ({}));
+    let { response, data } = await requestAdvice(payload);
+    if (response.status === 503 && data.code === 'AIR_DATA_UNAVAILABLE' && data.location) {
+      const airData = await fetchAirDataInBrowser(data.location);
+      ({ response, data } = await requestAdvice({ ...payload, airData }));
+    }
     if (!response.ok) {
       const details = Array.isArray(data.details) ? ` ${data.details.join('. ')}.` : '';
       throw new Error(`${data.error || 'Something went wrong.'}${details}`);

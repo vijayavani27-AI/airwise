@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { TtlCache } from '../lib/cache.js';
+import { AirDataUnavailableError, UpstreamError } from '../lib/errors.js';
+import { normalizeAirQuality } from './airQuality.js';
 import { computeImpact } from './impact.js';
 import { buildRulePlan } from './rules.js';
 
@@ -21,9 +23,21 @@ export function createAssistant({
     return airQuality.geocode(input.city);
   }
 
+  async function getAir(input, location) {
+    // Browser-supplied data (validated) is used only for this request, never cached,
+    // so one client cannot poison results for others.
+    if (input.airData) return normalizeAirQuality(input.airData);
+    try {
+      return await airQuality.getAirQuality(location);
+    } catch (error) {
+      if (error instanceof UpstreamError) throw new AirDataUnavailableError(location);
+      throw error;
+    }
+  }
+
   async function advise(input) {
     const location = await resolveLocation(input);
-    const air = await airQuality.getAirQuality(location);
+    const air = await getAir(input, location);
     const impact = computeImpact(input, air);
     const context = { location, air, profile: input, impact };
 

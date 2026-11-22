@@ -26,7 +26,8 @@ export function createApp({ assistant, aiEnabled, rateLimitPerMinute = 30, logge
           scriptSrc: ["'self'"],
           styleSrc: ["'self'"],
           imgSrc: ["'self'", 'data:'],
-          connectSrc: ["'self'"],
+          // The browser may fetch Open-Meteo directly if the server is rate-limited.
+          connectSrc: ["'self'", 'https://air-quality-api.open-meteo.com'],
           objectSrc: ["'none'"],
           frameAncestors: ["'none'"],
           baseUri: ["'self'"],
@@ -75,7 +76,12 @@ export function createApp({ assistant, aiEnabled, rateLimitPerMinute = 30, logge
       return res.status(413).json({ error: 'Request body is too large' });
     }
     if (err.expose && err.status >= 400 && err.status < 600) {
-      return res.status(err.status).json({ error: err.message, ...(err.details && { details: err.details }) });
+      return res.status(err.status).json({
+        error: err.message,
+        ...(err.details && { details: err.details }),
+        ...(err.code && { code: err.code }),
+        ...(err.location && { location: err.location }),
+      });
     }
     logger.error?.(err);
     return res.status(500).json({ error: 'Something went wrong. Please try again.' });

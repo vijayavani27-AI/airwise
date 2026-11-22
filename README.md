@@ -19,7 +19,8 @@ Browser ──► POST /api/advice ──► validate (whitelist) ──► geoc
 
 1. **Grounded GenAI.** The server computes the real numbers first (emissions, exposure, cleanest window), then asks Gemini to explain and personalise them. Because Gemini uses structured output (`responseSchema`), the response is always valid JSON in a fixed shape.
 2. **Graceful degradation.** If Gemini is unavailable, slow or out of quota, a deterministic rule engine produces a plan in the same shape, so users always get safe advice.
-3. **Efficiency.** In-memory TTL + LRU caches with de-duplication of in-flight requests: geocoding 24h, AQI 15 min, AI plans 10 min. Also gzip compression and cached static assets.
+3. **Resilient data fetching.** Free air-quality APIs often rate-limit shared cloud IPs. If the server gets a 429, it replies `503 AIR_DATA_UNAVAILABLE` with the coordinates, the browser fetches Open-Meteo itself using the user's own IP, and the server strictly validates that data. It uses it for that one request only and never caches it (no cache poisoning).
+4. **Efficiency.** In-memory TTL + LRU caches with de-duplication of in-flight requests: geocoding 24h, AQI 15 min, AI plans 10 min. Also gzip compression and cached static assets.
 
 ## Google services and GenAI used
 
@@ -37,7 +38,7 @@ Browser ──► POST /api/advice ──► validate (whitelist) ──► geoc
 | **Security** | Helmet with a strict CSP (no inline scripts), 10 kb body limit, per-IP rate limiting, whitelist validation, secrets only in env vars, generic error messages (no stack traces), output rendered with `textContent` (no XSS) |
 | **Prompt-injection defence** | Free text never reaches the LLM. The city is resolved to a canonical geocoded name, every other field is an enum, number or boolean, the system prompt treats input as data, and the LLM output is sanitised and size-capped |
 | **Efficiency** | TTL/LRU caches, request de-duplication, compression, static caching, timeouts on every upstream call (`AbortSignal.timeout`) |
-| **Testing** | 59 tests with the built-in `node:test` (unit, service and HTTP integration), all network calls faked, coverage via `npm run test:coverage` |
+| **Testing** | 67 tests with the built-in `node:test` (unit, service and HTTP integration), all network calls faked, coverage via `npm run test:coverage` |
 | **Accessibility** | Semantic landmarks, skip link, labelled fieldsets, `aria-live` results, focus moved to results, colour plus text for AQI levels, 44px touch targets, visible focus ring, dark mode, `prefers-reduced-motion` |
 
 ## Run locally
