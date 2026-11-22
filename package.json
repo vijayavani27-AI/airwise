@@ -1,0 +1,37 @@
+{
+  "name": "airwise",
+  "version": "1.0.0",
+  "description": "AirWise - a GenAI-powered urban air quality assistant that turns live AQI data into personalised, low-emission daily plans.",
+  "type": "module",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test \"test/**/*.test.js\"",
+    "test:coverage": "node --test --experimental-test-coverage \"test/**/*.test.js\"",
+    "lint": "eslint ."
+  },
+  "keywords": [
+    "air-quality",
+    "aqi",
+    "gemini",
+    "genai",
+    "sustainability",
+    "promptwars"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "compression": "^1.8.0",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.0.0",
+    "helmet": "^8.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.30.0",
+    "eslint": "^9.30.0",
+    "globals": "^16.3.0"
+  }
+}

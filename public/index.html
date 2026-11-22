@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="AirWise turns live air-quality data into a personalised, low-emission plan for your day - powered by Gemini." />
+    <meta name="theme-color" content="#0f766e" />
+    <title>AirWise - Urban Air Quality Assistant</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8C%AC%EF%B8%8F%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" type="module"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to main content</a>
+
+    <header class="site-header">
+      <div class="container">
+        <p class="brand"><span aria-hidden="true">🌬️</span> AirWise</p>
+        <p class="tagline">Your smog-season companion: breathe cleaner, emit less.</p>
+      </div>
+    </header>
+
+    <main id="main" class="container layout" tabindex="-1">
+      <section class="card form-card" aria-labelledby="form-title">
+        <h1 id="form-title">Plan a cleaner-air day</h1>
+        <p class="muted">Tell us a little about your household. We combine live air-quality data with AI to suggest a low-exposure, low-emission routine.</p>
+
+        <form id="advice-form" novalidate>
+          <fieldset>
+            <legend>Where are you?</legend>
+            <label for="city">City</label>
+            <div class="inline">
+              <input id="city" name="city" type="text" autocomplete="address-level2" placeholder="e.g. Delhi, Bengaluru, Lahore" maxlength="80" aria-describedby="city-hint" />
+              <button type="button" id="locate-btn" class="secondary">Use my location</button>
+            </div>
+            <p id="city-hint" class="hint">Your location is only used to look up local air quality.</p>
+          </fieldset>
+
+          <fieldset>
+            <legend>Daily commute</legend>
+            <div class="grid-2">
+              <div>
+                <label for="commuteMode">Usual mode</label>
+                <select id="commuteMode" name="commuteMode">
+                  <option value="car">Car</option>
+                  <option value="motorbike">Motorbike / scooter</option>
+                  <option value="autorickshaw">Auto-rickshaw</option>
+                  <option value="bus" selected>Bus</option>
+                  <option value="metro">Metro / train</option>
+                  <option value="bicycle">Bicycle</option>
+                  <option value="walk">Walk</option>
+                  <option value="wfh">Work / study from home</option>
+                </select>
+              </div>
+              <div>
+                <label for="commuteKm">One-way distance (km)</label>
+                <input id="commuteKm" name="commuteKm" type="number" inputmode="decimal" min="0" max="200" step="0.5" value="10" />
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Who lives with you?</legend>
+            <div class="checks">
+              <label class="check"><input type="checkbox" name="children" /> Children</label>
+              <label class="check"><input type="checkbox" name="elderly" /> Elderly (65+)</label>
+              <label class="check"><input type="checkbox" name="respiratory" /> Asthma / lung condition</label>
+              <label class="check"><input type="checkbox" name="pregnant" /> Pregnancy</label>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Your home</legend>
+            <div class="grid-2">
+              <div>
+                <label for="cookingFuel">Cooking fuel</label>
+                <select id="cookingFuel" name="cookingFuel">
+                  <option value="lpg" selected>LPG cylinder</option>
+                  <option value="png">Piped gas (PNG)</option>
+                  <option value="electric">Induction / electric</option>
+                  <option value="biomass">Wood / biomass</option>
+                </select>
+              </div>
+              <div>
+                <label for="heating">Winter heating</label>
+                <select id="heating" name="heating">
+                  <option value="none" selected>None</option>
+                  <option value="electric">Electric heater</option>
+                  <option value="gas">Gas heater</option>
+                  <option value="wood">Wood fire</option>
+                  <option value="coal">Coal / angithi</option>
+                </select>
+              </div>
+            </div>
+            <label class="check"><input type="checkbox" name="hasPurifier" /> I have an air purifier</label>
+          </fieldset>
+
+          <fieldset>
+            <legend>When do you like to exercise outdoors?</legend>
+            <div class="checks">
+              <label class="check"><input type="radio" name="activity" value="morning" checked /> Morning</label>
+              <label class="check"><input type="radio" name="activity" value="evening" /> Evening</label>
+              <label class="check"><input type="radio" name="activity" value="none" /> I don't</label>
+            </div>
+          </fieldset>
+
+          <div id="form-error" class="error" role="alert" hidden></div>
+
+          <button type="submit" id="submit-btn" class="primary">Get my clean-air plan</button>
+        </form>
+      </section>
+
+      <section id="results" class="results" aria-labelledby="results-title" aria-live="polite" aria-busy="false">
+        <div class="card placeholder" id="placeholder">
+          <h2 id="results-title">Your plan will appear here</h2>
+          <p class="muted">You'll see today's air quality, when the air is cleanest, and an AI-generated routine that explains the real impact of every choice.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container">
+        <p>Air-quality data: <a href="https://open-meteo.com/en/docs/air-quality-api">Open-Meteo</a> (CAMS). AI plans: Google Gemini. Estimates are for guidance only and are not medical advice.</p>
+      </div>
+    </footer>
+
+    <template id="results-template">
+      <div class="card aqi-card">
+        <div class="aqi-head">
+          <div>
+            <h2 id="results-title" tabindex="-1">Air quality in <span data-field="place"></span></h2>
+            <p class="muted small">Updated <span data-field="observed"></span> (local time)</p>
+          </div>
+          <div class="aqi-badge" data-field="badge">
+            <span class="aqi-number" data-field="aqi"></span>
+            <span class="aqi-label">US AQI</span>
+          </div>
+        </div>
+        <p class="aqi-category" data-field="category"></p>
+        <dl class="pollutants" data-field="pollutants"></dl>
+        <h3>Next 24 hours</h3>
+        <div class="forecast" data-field="forecast" role="img"></div>
+        <p class="small" data-field="window"></p>
+      </div>
+
+      <div class="card">
+        <h3>Your impact at a glance</h3>
+        <ul class="stats" data-field="stats"></ul>
+      </div>
+
+      <div class="card plan-card">
+        <div class="plan-head">
+          <h3>Today's plan</h3>
+          <span class="source-badge" data-field="source"></span>
+        </div>
+        <p data-field="summary"></p>
+
+        <h4>Low-emission routine</h4>
+        <ol class="timeline" data-field="routine"></ol>
+
+        <h4>Indoor air hacks</h4>
+        <ul class="tips" data-field="indoorTips"></ul>
+
+        <h4>Sustainable swaps</h4>
+        <ul class="tips" data-field="alternatives"></ul>
+
+        <h4>Health notes</h4>
+        <ul class="alerts" data-field="healthAlerts"></ul>
+      </div>
+    </template>
+  </body>
+</html>
