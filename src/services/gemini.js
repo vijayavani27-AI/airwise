@@ -41,8 +41,11 @@ export function buildUserPrompt({ location, air, profile, impact }) {
   return `Household and air-quality data (JSON):\n${JSON.stringify(data)}`;
 }
 
-/** Google-maintained aliases that always point at the current Flash models. */
-export const FALLBACK_MODELS = Object.freeze(['gemini-flash-latest', 'gemini-flash-lite-latest']);
+/**
+ * Tried in order after the configured model: Google's currently recommended Flash
+ * model, then the aliases that always point at the current Flash models.
+ */
+export const FALLBACK_MODELS = Object.freeze(['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-flash-lite-latest']);
 const RETRYABLE_STATUSES = new Set([429, 500, 503]);
 const RETRY_DELAY_MS = 800;
 
@@ -83,6 +86,8 @@ export function createGeminiService({
   let candidates = [...new Set([model, ...FALLBACK_MODELS].filter(Boolean))];
 
   function callModel(modelName, context) {
+    // Gemini 3.x models "think" by default; a low level keeps latency interactive.
+    const thinking = modelName.startsWith('gemini-3') ? { thinkingConfig: { thinkingLevel: 'low' } } : {};
     return fetchImpl(`${API_BASE}/${encodeURIComponent(modelName)}:generateContent`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
@@ -94,6 +99,7 @@ export function createGeminiService({
           maxOutputTokens: 8192,
           responseMimeType: 'application/json',
           responseSchema: PLAN_SCHEMA,
+          ...thinking,
         },
       }),
       signal: AbortSignal.timeout(timeoutMs),
@@ -103,7 +109,14 @@ export function createGeminiService({
   /** Try one model (with a single retry on transient errors). Returns a plan or null. */
   async function tryModel(modelName, context) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const response = await callModel(modelName, context);
+      let response;
+      try {
+        response = await callModel(modelName, context);
+      } catch (error) {
+        // Timeout or network error: move on to the next model rather than failing.
+        logger.warn?.(`Gemini "${modelName}" request failed: ${error.message}`);
+        return null;
+      }
       if (response.ok) {
         const text = extractText(await response.json());
         if (!text) throw new UpstreamError('Gemini returned an empty response');

@@ -18,7 +18,7 @@ Browser ──► POST /api/advice ──► validate (whitelist) ──► geoc
 ```
 
 1. **Grounded GenAI.** The server computes the real numbers first (emissions, exposure, cleanest window), then asks Gemini to explain and personalise them. Because Gemini uses structured output (`responseSchema`), the response is always valid JSON in a fixed shape.
-2. **Graceful degradation.** If Gemini is unavailable, slow or out of quota, a deterministic rule engine produces a plan in the same shape, so users always get safe advice. If the configured model has been retired (HTTP 404), it automatically falls back to `gemini-flash-latest` and remembers the model that works.
+2. **Graceful degradation.** If Gemini is unavailable, slow or out of quota, a deterministic rule engine produces a plan in the same shape, so users always get safe advice. If the configured model has been retired (HTTP 404), it is dropped and the app falls back to `gemini-3.8-flash`, then the `gemini-flash-latest` and `gemini-flash-lite-latest` aliases. Overloaded models (503/429) get one retry, and timeouts move on to the next model.
 3. **Resilient data fetching.** Free air-quality APIs often rate-limit shared cloud IPs. If the server gets a 429, it replies `503 AIR_DATA_UNAVAILABLE` with the coordinates, the browser fetches Open-Meteo itself using the user's own IP, and the server strictly validates that data. It uses it for that one request only and never caches it (no cache poisoning).
 4. **Efficiency.** In-memory TTL + LRU caches with de-duplication of in-flight requests: geocoding 24h, AQI 15 min, AI plans 10 min. Also gzip compression and cached static assets.
 
@@ -26,7 +26,7 @@ Browser ──► POST /api/advice ──► validate (whitelist) ──► geoc
 
 | Service | Where |
 | --- | --- |
-| **Gemini API** (`gemini-flash-latest` by default, via Google AI Studio) | `src/services/gemini.js`: writes the personalised routine, indoor tips, alternatives and impact explanations, with JSON-schema structured output |
+| **Gemini API** (`gemini-3.8-flash` by default with automatic fallbacks, via Google AI Studio) | `src/services/gemini.js`: writes the personalised routine, indoor tips, alternatives and impact explanations, with JSON-schema structured output |
 | **Google Cloud Run** (deployment target) | `Dockerfile`: stateless container, listens on `$PORT`, graceful SIGTERM shutdown |
 | Open-Meteo Air Quality API (Copernicus CAMS) | `src/services/airQuality.js`: live AQI, pollutants and hourly forecast |
 
@@ -38,7 +38,7 @@ Browser ──► POST /api/advice ──► validate (whitelist) ──► geoc
 | **Security** | Helmet with a strict CSP (no inline scripts), 10 kb body limit, per-IP rate limiting, whitelist validation, secrets only in env vars, generic error messages (no stack traces), output rendered with `textContent` (no XSS) |
 | **Prompt-injection defence** | Free text never reaches the LLM. The city is resolved to a canonical geocoded name, every other field is an enum, number or boolean, the system prompt treats input as data, and the LLM output is sanitised and size-capped |
 | **Efficiency** | TTL/LRU caches, request de-duplication, compression, static caching, timeouts on every upstream call (`AbortSignal.timeout`) |
-| **Testing** | 69 tests with the built-in `node:test` (unit, service and HTTP integration), all network calls faked, coverage via `npm run test:coverage` |
+| **Testing** | 70 tests with the built-in `node:test` (unit, service and HTTP integration), all network calls faked, coverage via `npm run test:coverage` |
 | **Accessibility** | Semantic landmarks, skip link, labelled fieldsets, `aria-live` results, focus moved to results, colour plus text for AQI levels, 44px touch targets, visible focus ring, dark mode, `prefers-reduced-motion` |
 
 ## Run locally
@@ -62,7 +62,7 @@ Without a `GEMINI_API_KEY` the app still works using the rule-based planner.
 
 ```bash
 gcloud run deploy airwise --source . --region asia-south1 --allow-unauthenticated \
-  --set-env-vars GEMINI_MODEL=gemini-flash-latest --set-secrets GEMINI_API_KEY=gemini-api-key:latest
+  --set-env-vars GEMINI_MODEL=gemini-3.8-flash --set-secrets GEMINI_API_KEY=gemini-api-key:latest
 ```
 
 ## API

@@ -177,12 +177,12 @@ describe('Gemini service', () => {
     const gemini = createGeminiService({ apiKey: 'k', model: 'old-model', fetchImpl, logger: silentLogger });
     const plan = await gemini.generatePlan(context);
     assert.equal(plan.summary, 'Unhealthy air today.');
-    assert.equal(gemini.model, 'gemini-flash-latest');
+    assert.equal(gemini.model, 'gemini-3.8-flash');
     await gemini.generatePlan(context);
     assert.equal(urls.length, 3, 'the retired model is skipped after it 404s');
   });
 
-  it('retries an overloaded model once, then tries the lite alias', async () => {
+  it('retries overloaded models once each, then tries the next fallback', async () => {
     const calls = [];
     const fetchImpl = async (url) => {
       calls.push(url.match(/models\/([^:]+)/)[1]);
@@ -194,8 +194,22 @@ describe('Gemini service', () => {
     const gemini = createGeminiService({ apiKey: 'k', model: 'gemini-flash-latest', fetchImpl, logger: silentLogger, retryDelayMs: 0 });
     const plan = await gemini.generatePlan(context);
     assert.equal(plan.summary, 'Unhealthy air today.');
-    assert.deepEqual(calls, ['gemini-flash-latest', 'gemini-flash-latest', 'gemini-flash-lite-latest']);
+    assert.deepEqual(calls, ['gemini-flash-latest', 'gemini-flash-latest', 'gemini-3.8-flash', 'gemini-3.8-flash', 'gemini-flash-lite-latest']);
     assert.equal(gemini.model, 'gemini-flash-latest', 'overloaded models are not dropped');
+  });
+
+  it('uses a low thinking level for Gemini 3 models and moves on after a timeout', async () => {
+    const bodies = [];
+    const fetchImpl = async (url, options) => {
+      const name = url.match(/models[/]([^:]+)/)[1];
+      bodies.push([name, JSON.parse(options.body).generationConfig.thinkingConfig]);
+      if (name === 'gemini-3.8-flash') throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      return jsonResponse({ candidates: [{ content: { parts: [{ text: JSON.stringify(geminiPlan) }] } }] });
+    };
+    const gemini = createGeminiService({ apiKey: 'k', model: 'gemini-3.8-flash', fetchImpl, logger: silentLogger });
+    const plan = await gemini.generatePlan(context);
+    assert.equal(plan.summary, 'Unhealthy air today.');
+    assert.deepEqual(bodies, [['gemini-3.8-flash', { thinkingLevel: 'low' }], ['gemini-flash-latest', undefined]]);
   });
 
   it('is disabled without an API key', async () => {
