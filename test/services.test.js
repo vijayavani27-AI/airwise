@@ -167,11 +167,11 @@ describe('Gemini service', () => {
     assert.ok(body.generationConfig.responseSchema);
   });
 
-  it('falls back to the latest-alias model when the configured model is retired', async () => {
+  it('drops retired models and falls back to the latest alias', async () => {
     const urls = [];
     const fetchImpl = async (url) => {
       urls.push(url);
-      if (url.includes('old-model')) return jsonResponse({ error: { code: 404 } }, 404);
+      if (url.includes('old-model')) return jsonResponse({ error: { message: 'not found' } }, 404);
       return jsonResponse({ candidates: [{ content: { parts: [{ text: 'thinking...', thought: true }, { text: JSON.stringify(geminiPlan) }] } }] });
     };
     const gemini = createGeminiService({ apiKey: 'k', model: 'old-model', fetchImpl, logger: silentLogger });
@@ -179,7 +179,23 @@ describe('Gemini service', () => {
     assert.equal(plan.summary, 'Unhealthy air today.');
     assert.equal(gemini.model, 'gemini-flash-latest');
     await gemini.generatePlan(context);
-    assert.equal(urls.length, 3, 'the retired model is skipped after the first success');
+    assert.equal(urls.length, 3, 'the retired model is skipped after it 404s');
+  });
+
+  it('retries an overloaded model once, then tries the lite alias', async () => {
+    const calls = [];
+    const fetchImpl = async (url) => {
+      calls.push(url.match(/models\/([^:]+)/)[1]);
+      if (url.includes('flash-lite')) {
+        return jsonResponse({ candidates: [{ content: { parts: [{ text: JSON.stringify(geminiPlan) }] } }] });
+      }
+      return jsonResponse({ error: { message: 'The model is overloaded' } }, 503);
+    };
+    const gemini = createGeminiService({ apiKey: 'k', model: 'gemini-flash-latest', fetchImpl, logger: silentLogger, retryDelayMs: 0 });
+    const plan = await gemini.generatePlan(context);
+    assert.equal(plan.summary, 'Unhealthy air today.');
+    assert.deepEqual(calls, ['gemini-flash-latest', 'gemini-flash-latest', 'gemini-flash-lite-latest']);
+    assert.equal(gemini.model, 'gemini-flash-latest', 'overloaded models are not dropped');
   });
 
   it('is disabled without an API key', async () => {
@@ -189,7 +205,9 @@ describe('Gemini service', () => {
   });
 
   it('rejects HTTP errors and empty responses', async () => {
-    const httpError = createGeminiService({ apiKey: 'k', model: 'm', fetchImpl: async () => jsonResponse({}, 429) });
+    const httpError = createGeminiService({ apiKey: 'k', model: 'm', logger: silentLogger, retryDelayMs: 0, fetchImpl: async () => jsonResponse({}, 429) });
+    const forbidden = createGeminiService({ apiKey: 'k', model: 'm', logger: silentLogger, fetchImpl: async () => jsonResponse({}, 403) });
+    await assert.rejects(forbidden.generatePlan(context), /status 403/);
     const allMissing = createGeminiService({ apiKey: 'k', model: 'm', logger: silentLogger, fetchImpl: async () => jsonResponse({}, 404) });
     await assert.rejects(allMissing.generatePlan(context), UpstreamError);
     await assert.rejects(httpError.generatePlan(context), UpstreamError);

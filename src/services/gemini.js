@@ -41,19 +41,48 @@ export function buildUserPrompt({ location, air, profile, impact }) {
   return `Household and air-quality data (JSON):\n${JSON.stringify(data)}`;
 }
 
-/** Google-maintained alias that always points at the current Flash model. */
-export const FALLBACK_MODEL = 'gemini-flash-latest';
+/** Google-maintained aliases that always point at the current Flash models. */
+export const FALLBACK_MODELS = Object.freeze(['gemini-flash-latest', 'gemini-flash-lite-latest']);
+const RETRYABLE_STATUSES = new Set([429, 500, 503]);
+const RETRY_DELAY_MS = 800;
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Read Google's error message (never contains the API key) for diagnostics. */
+async function errorMessage(response) {
+  try {
+    const body = await response.json();
+    return String(body?.error?.message ?? '').slice(0, 200);
+  } catch {
+    return '';
+  }
+}
+
+function extractText(data) {
+  return (data?.candidates?.[0]?.content?.parts ?? [])
+    .filter((part) => !part.thought)
+    .map((part) => part.text ?? '')
+    .join('');
+}
 
 /**
- * @param {{ apiKey: string, model: string, fetchImpl?: typeof fetch, timeoutMs?: number, logger?: Console }} options
+ * @param {{ apiKey: string, model: string, fetchImpl?: typeof fetch, timeoutMs?: number,
+ *   logger?: Console, retryDelayMs?: number }} options
  */
-export function createGeminiService({ apiKey, model, fetchImpl = globalThis.fetch, timeoutMs = 20000, logger = console }) {
+export function createGeminiService({
+  apiKey,
+  model,
+  fetchImpl = globalThis.fetch,
+  timeoutMs = 20000,
+  logger = console,
+  retryDelayMs = RETRY_DELAY_MS,
+}) {
   const enabled = Boolean(apiKey);
-  // Models get retired over time; if the configured one 404s we fall back to the
-  // alias and remember whichever model worked so later requests skip the 404.
-  let candidates = [...new Set([model, FALLBACK_MODEL].filter(Boolean))];
+  // Models get retired (404) or overloaded (503) over time. Retired models are
+  // dropped for good; overloaded ones get one retry before we try the next alias.
+  let candidates = [...new Set([model, ...FALLBACK_MODELS].filter(Boolean))];
 
-  async function callModel(modelName, context) {
+  function callModel(modelName, context) {
     return fetchImpl(`${API_BASE}/${encodeURIComponent(modelName)}:generateContent`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
@@ -71,28 +100,36 @@ export function createGeminiService({ apiKey, model, fetchImpl = globalThis.fetc
     });
   }
 
+  /** Try one model (with a single retry on transient errors). Returns a plan or null. */
+  async function tryModel(modelName, context) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await callModel(modelName, context);
+      if (response.ok) {
+        const text = extractText(await response.json());
+        if (!text) throw new UpstreamError('Gemini returned an empty response');
+        return sanitizePlan(JSON.parse(text));
+      }
+      const message = await errorMessage(response);
+      logger.warn?.(`Gemini "${modelName}" responded ${response.status}: ${message}`);
+      if (response.status === 404) {
+        candidates = candidates.filter((name) => name !== modelName);
+        return null;
+      }
+      if (!RETRYABLE_STATUSES.has(response.status)) {
+        throw new UpstreamError(`Gemini request failed with status ${response.status}`);
+      }
+      if (attempt === 0) await delay(retryDelayMs);
+    }
+    return null;
+  }
+
   async function generatePlan(context) {
     if (!enabled) throw new Error('Gemini API key is not configured');
-
-    for (const [index, modelName] of candidates.entries()) {
-      const response = await callModel(modelName, context);
-      if (response.status === 404 && index < candidates.length - 1) {
-        logger.warn?.(`Gemini model "${modelName}" not found; trying "${candidates[index + 1]}"`);
-        continue;
-      }
-      if (!response.ok) throw new UpstreamError(`Gemini request failed with status ${response.status}`);
-
-      const data = await response.json();
-      const text = (data?.candidates?.[0]?.content?.parts ?? [])
-        .filter((part) => !part.thought)
-        .map((part) => part.text ?? '')
-        .join('');
-      if (!text) throw new UpstreamError('Gemini returned an empty response');
-      const plan = sanitizePlan(JSON.parse(text));
-      if (index > 0) candidates = candidates.slice(index);
-      return plan;
+    for (const modelName of [...candidates]) {
+      const plan = await tryModel(modelName, context);
+      if (plan) return plan;
     }
-    throw new UpstreamError('No Gemini model is available');
+    throw new UpstreamError('No Gemini model is currently available');
   }
 
   return {

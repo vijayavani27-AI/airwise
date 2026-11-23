@@ -38,7 +38,7 @@ Browser ──► POST /api/advice ──► validate (whitelist) ──► geoc
 | **Security** | Helmet with a strict CSP (no inline scripts), 10 kb body limit, per-IP rate limiting, whitelist validation, secrets only in env vars, generic error messages (no stack traces), output rendered with `textContent` (no XSS) |
 | **Prompt-injection defence** | Free text never reaches the LLM. The city is resolved to a canonical geocoded name, every other field is an enum, number or boolean, the system prompt treats input as data, and the LLM output is sanitised and size-capped |
 | **Efficiency** | TTL/LRU caches, request de-duplication, compression, static caching, timeouts on every upstream call (`AbortSignal.timeout`) |
-| **Testing** | 67 tests with the built-in `node:test` (unit, service and HTTP integration), all network calls faked, coverage via `npm run test:coverage` |
+| **Testing** | 69 tests with the built-in `node:test` (unit, service and HTTP integration), all network calls faked, coverage via `npm run test:coverage` |
 | **Accessibility** | Semantic landmarks, skip link, labelled fieldsets, `aria-live` results, focus moved to results, colour plus text for AQI levels, 44px touch targets, visible focus ring, dark mode, `prefers-reduced-motion` |
 
 ## Run locally
