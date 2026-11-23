@@ -41,16 +41,20 @@ export function buildUserPrompt({ location, air, profile, impact }) {
   return `Household and air-quality data (JSON):\n${JSON.stringify(data)}`;
 }
 
+/** Google-maintained alias that always points at the current Flash model. */
+export const FALLBACK_MODEL = 'gemini-flash-latest';
+
 /**
- * @param {{ apiKey: string, model: string, fetchImpl?: typeof fetch, timeoutMs?: number }} options
+ * @param {{ apiKey: string, model: string, fetchImpl?: typeof fetch, timeoutMs?: number, logger?: Console }} options
  */
-export function createGeminiService({ apiKey, model, fetchImpl = globalThis.fetch, timeoutMs = 15000 }) {
+export function createGeminiService({ apiKey, model, fetchImpl = globalThis.fetch, timeoutMs = 20000, logger = console }) {
   const enabled = Boolean(apiKey);
+  // Models get retired over time; if the configured one 404s we fall back to the
+  // alias and remember whichever model worked so later requests skip the 404.
+  let candidates = [...new Set([model, FALLBACK_MODEL].filter(Boolean))];
 
-  async function generatePlan(context) {
-    if (!enabled) throw new Error('Gemini API key is not configured');
-
-    const response = await fetchImpl(`${API_BASE}/${encodeURIComponent(model)}:generateContent`, {
+  async function callModel(modelName, context) {
+    return fetchImpl(`${API_BASE}/${encodeURIComponent(modelName)}:generateContent`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
       body: JSON.stringify({
@@ -58,21 +62,44 @@ export function createGeminiService({ apiKey, model, fetchImpl = globalThis.fetc
         contents: [{ role: 'user', parts: [{ text: buildUserPrompt(context) }] }],
         generationConfig: {
           temperature: 0.4,
-          maxOutputTokens: 4096,
+          maxOutputTokens: 8192,
           responseMimeType: 'application/json',
           responseSchema: PLAN_SCHEMA,
         },
       }),
       signal: AbortSignal.timeout(timeoutMs),
     });
-
-    if (!response.ok) throw new UpstreamError(`Gemini request failed with status ${response.status}`);
-
-    const data = await response.json();
-    const text = (data?.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? '').join('');
-    if (!text) throw new UpstreamError('Gemini returned an empty response');
-    return sanitizePlan(JSON.parse(text));
   }
 
-  return { enabled, model, generatePlan };
+  async function generatePlan(context) {
+    if (!enabled) throw new Error('Gemini API key is not configured');
+
+    for (const [index, modelName] of candidates.entries()) {
+      const response = await callModel(modelName, context);
+      if (response.status === 404 && index < candidates.length - 1) {
+        logger.warn?.(`Gemini model "${modelName}" not found; trying "${candidates[index + 1]}"`);
+        continue;
+      }
+      if (!response.ok) throw new UpstreamError(`Gemini request failed with status ${response.status}`);
+
+      const data = await response.json();
+      const text = (data?.candidates?.[0]?.content?.parts ?? [])
+        .filter((part) => !part.thought)
+        .map((part) => part.text ?? '')
+        .join('');
+      if (!text) throw new UpstreamError('Gemini returned an empty response');
+      const plan = sanitizePlan(JSON.parse(text));
+      if (index > 0) candidates = candidates.slice(index);
+      return plan;
+    }
+    throw new UpstreamError('No Gemini model is available');
+  }
+
+  return {
+    enabled,
+    get model() {
+      return candidates[0];
+    },
+    generatePlan,
+  };
 }

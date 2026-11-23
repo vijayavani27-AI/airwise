@@ -167,6 +167,21 @@ describe('Gemini service', () => {
     assert.ok(body.generationConfig.responseSchema);
   });
 
+  it('falls back to the latest-alias model when the configured model is retired', async () => {
+    const urls = [];
+    const fetchImpl = async (url) => {
+      urls.push(url);
+      if (url.includes('old-model')) return jsonResponse({ error: { code: 404 } }, 404);
+      return jsonResponse({ candidates: [{ content: { parts: [{ text: 'thinking...', thought: true }, { text: JSON.stringify(geminiPlan) }] } }] });
+    };
+    const gemini = createGeminiService({ apiKey: 'k', model: 'old-model', fetchImpl, logger: silentLogger });
+    const plan = await gemini.generatePlan(context);
+    assert.equal(plan.summary, 'Unhealthy air today.');
+    assert.equal(gemini.model, 'gemini-flash-latest');
+    await gemini.generatePlan(context);
+    assert.equal(urls.length, 3, 'the retired model is skipped after the first success');
+  });
+
   it('is disabled without an API key', async () => {
     const gemini = createGeminiService({ apiKey: '', model: 'x' });
     assert.equal(gemini.enabled, false);
@@ -175,6 +190,8 @@ describe('Gemini service', () => {
 
   it('rejects HTTP errors and empty responses', async () => {
     const httpError = createGeminiService({ apiKey: 'k', model: 'm', fetchImpl: async () => jsonResponse({}, 429) });
+    const allMissing = createGeminiService({ apiKey: 'k', model: 'm', logger: silentLogger, fetchImpl: async () => jsonResponse({}, 404) });
+    await assert.rejects(allMissing.generatePlan(context), UpstreamError);
     await assert.rejects(httpError.generatePlan(context), UpstreamError);
     const empty = createGeminiService({ apiKey: 'k', model: 'm', fetchImpl: async () => jsonResponse({ candidates: [] }) });
     await assert.rejects(empty.generatePlan(context), UpstreamError);

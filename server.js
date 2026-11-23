@@ -9,7 +9,7 @@ const config = loadConfig();
 const gemini = createGeminiService({
   apiKey: config.geminiApiKey,
   model: config.geminiModel,
-  timeoutMs: config.upstreamTimeoutMs,
+  timeoutMs: config.geminiTimeoutMs,
 });
 const airQuality = createAirQualityService({ timeoutMs: config.upstreamTimeoutMs });
 const assistant = createAssistant({ airQuality, gemini });
